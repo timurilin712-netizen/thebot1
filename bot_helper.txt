@@ -112,3 +112,83 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+# Пересылка вопроса (текст или фото)
+@dp.message(FeedbackState.waiting_for_question, F.photo | F.text)
+async def forward_question(message: types.Message, state: FSMContext):
+    user_info = f"@{message.from_user.username}" if message.from_user.username else f"ID: {message.from_user.id}"
+    
+    # Жесткая проверка текста, чтобы исключить None
+    safe_text = message.text if message.text else (message.caption if message.caption else "(без текста)")
+    
+    admin_caption = (
+        f"❓ <b>Новый вопрос</b>\n"
+        f"От: {message.from_user.full_name} ({user_info})\n"
+        f"ID: <code>{message.from_user.id}</code>\n\n"
+        f"Сообщение:\n{safe_text}\n\n"
+        f"<i>(Чтобы ответить, сделайте Reply на это сообщение)</i>"
+    )
+    
+    if message.photo:
+        await bot.send_photo(ADMIN_ID, photo=message.photo[-1].file_id, caption=admin_caption, parse_mode="HTML")
+    else:
+        await bot.send_message(ADMIN_ID, admin_caption, parse_mode="HTML")
+        
+    await message.answer("Ваш вопрос отправлен администратору. Ожидайте ответа!", reply_markup=main_keyboard)
+    await state.clear()
+
+# Пересылка ошибки (текст или фото)
+@dp.message(FeedbackState.waiting_for_error, F.photo | F.text)
+async def forward_error(message: types.Message, state: FSMContext):
+    user_info = f"@{message.from_user.username}" if message.from_user.username else f"ID: {message.from_user.id}"
+    
+    # Жесткая проверка текста, чтобы исключить None
+    safe_text = message.text if message.text else (message.caption if message.caption else "(без текста)")
+    
+    admin_caption = (
+        f"⚠️ <b>Сообщение об ошибке</b>\n"
+        f"От: {message.from_user.full_name} ({user_info})\n"
+        f"ID: <code>{message.from_user.id}</code>\n\n"
+        f"Сообщение:\n{safe_text}\n\n"
+        f"<i>(Чтобы ответить, сделайте Reply на это сообщение)</i>"
+    )
+    
+    if message.photo:
+        await bot.send_photo(ADMIN_ID, photo=message.photo[-1].file_id, caption=admin_caption, parse_mode="HTML")
+    else:
+        await bot.send_message(ADMIN_ID, admin_caption, parse_mode="HTML")
+        
+    await message.answer("Информация об ошибке передана. Спасибо!", reply_markup=main_keyboard)
+    await state.clear()
+
+# Ответ администратора (убраны появления None)
+@dp.message(F.chat.id == ADMIN_ID, F.reply_to_message)
+async def admin_reply(message: types.Message):
+    reply = message.reply_to_message
+    
+    # Ищем ID в тексте или подписи оригинального сообщения
+    source_text = reply.text if reply.text else (reply.caption if reply.caption else "")
+    
+    if "ID: " in source_text:
+        try:
+            target_id = int(source_text.split("ID: ")[1].split("\n")[0].replace("<code>", "").replace("</code>", "").strip())
+            
+            if message.photo:
+                # Если админ прислал фото без подписи, отправляем только заголовок
+                safe_caption = message.caption if message.caption else ""
+                final_caption = f"💬 <b>Ответ от администратора:</b>\n\n{safe_caption}" if safe_caption else "💬 <b>Ответ от администратора:</b>"
+                
+                await bot.send_photo(target_id, photo=message.photo[-1].file_id, caption=final_caption, parse_mode="HTML")
+            else:
+                safe_text = message.text if message.text else ""
+                await bot.send_message(
+                    target_id, 
+                    f"💬 <b>Ответ от администратора:</b>\n\n{safe_text}", 
+                    parse_mode="HTML"
+                )
+                
+            await message.answer("✅ Ответ успешно доставлен пользователю!")
+        except Exception as e:
+            await message.answer(f"❌ Ошибка отправки ответа: {e}")
+    else:
+        await message.answer("Не удалось определить ID пользователя из сообщения.")

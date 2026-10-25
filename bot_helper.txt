@@ -1,0 +1,114 @@
+import asyncio
+import logging
+from aiogram import Bot, Dispatcher, F, types
+from aiogram.filters import CommandStart, Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+
+BOT_TOKEN = "8851021561:AAFYWzwDXI1zm_Pzr4OEzHhimJaPgr7paQU"
+ADMIN_ID = 6302658669
+
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher(storage=MemoryStorage())
+
+class FeedbackState(StatesGroup):
+    waiting_for_question = State()
+    waiting_for_error = State()
+
+main_keyboard = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Задать вопрос")],
+        [KeyboardButton(text="Сообщить об ошибке")]
+    ],
+    resize_keyboard=True
+)
+
+# Оповещение об успешном запуске бота
+async def on_startup(bot: Bot):
+    bot_info = await bot.get_me()
+    print(f"\n==========================================")
+    print(f"✅ Бот @{bot_info.username} успешно загружен и запущен!")
+    print(f"==========================================\n")
+    try:
+        await bot.send_message(ADMIN_ID, f"🚀 <b>Бот @{bot_info.username} успешно загружен и готов к работе!</b>", parse_mode="HTML")
+    except Exception as e:
+        print(f"Не удалось отправить уведомление админу: {e}")
+
+@dp.message(CommandStart())
+async def cmd_start(message: types.Message, state: FSMContext):
+    await state.clear()
+    welcome_text = "Привет! Я бот телеграмм группы FLX. В скором времени тебе поступит ответ!"
+    await message.answer(welcome_text, reply_markup=main_keyboard)
+    
+    user_info = f"@{message.from_user.username}" if message.from_user.username else f"ID: {message.from_user.id}"
+    await bot.send_message(
+        ADMIN_ID, 
+        f"👤 Пользователь {message.from_user.full_name} ({user_info}) запустил бота (/start)."
+    )
+
+@dp.message(F.text == "Задать вопрос")
+@dp.message(Command("question"))
+async def process_question_btn(message: types.Message, state: FSMContext):
+    await state.set_state(FeedbackState.waiting_for_question)
+    await message.answer("Напишите ваш вопрос, и мы передадим его администратору:")
+
+@dp.message(F.text == "Сообщить об ошибке")
+@dp.message(Command("error"))
+async def process_error_btn(message: types.Message, state: FSMContext):
+    await state.set_state(FeedbackState.waiting_for_error)
+    await message.answer("Опишите возникшую ошибку, и мы передадим ее администратору:")
+
+@dp.message(FeedbackState.waiting_for_question)
+async def forward_question(message: types.Message, state: FSMContext):
+    user_info = f"@{message.from_user.username}" if message.from_user.username else f"ID: {message.from_user.id}"
+    admin_caption = (
+        f"❓ <b>Новый вопрос</b>\n"
+        f"От: {message.from_user.full_name} ({user_info})\n"
+        f"ID: <code>{message.from_user.id}</code>\n\n"
+        f"Текст:\n{message.text}\n\n"
+        f"<i>(Чтобы ответить, сделайте Reply на это сообщение)</i>"
+    )
+    await bot.send_message(ADMIN_ID, admin_caption, parse_mode="HTML")
+    await message.answer("Ваш вопрос отправлен администратору. Ожидайте ответа!")
+    await state.clear()
+
+@dp.message(FeedbackState.waiting_for_error)
+async def forward_error(message: types.Message, state: FSMContext):
+    user_info = f"@{message.from_user.username}" if message.from_user.username else f"ID: {message.from_user.id}"
+    admin_caption = (
+        f"⚠️ <b>Сообщение об ошибке</b>\n"
+        f"От: {message.from_user.full_name} ({user_info})\n"
+        f"ID: <code>{message.from_user.id}</code>\n\n"
+        f"Текст:\n{message.text}\n\n"
+        f"<i>(Чтобы ответить, сделайте Reply на это сообщение)</i>"
+    )
+    await bot.send_message(ADMIN_ID, admin_caption, parse_mode="HTML")
+    await message.answer("Информация об ошибке передана. Спасибо!", reply_markup=main_keyboard)
+    await state.clear()
+
+@dp.message(F.chat.id == ADMIN_ID, F.reply_to_message)
+async def admin_reply(message: types.Message):
+    reply = message.reply_to_message
+    if reply.text and "ID: " in reply.text:
+        try:
+            target_id = int(reply.text.split("ID: ")[1].split("\n")[0].replace("<code>", "").replace("</code>", "").strip())
+            await bot.send_message(
+                target_id, 
+                f"💬 <b>Ответ от администратора:</b>\n\n{message.text}", 
+                parse_mode="HTML"
+            )
+            await message.answer("✅ Ответ успешно отправлен пользователю!")
+        except Exception as e:
+            await message.answer(f"❌ Ошибка отправки ответа: {e}")
+    else:
+        await message.answer("Не удалось определить ID пользователя из сообщения.")
+
+async def main():
+    logging.basicConfig(level=logging.INFO)
+    dp.startup.register(on_startup)
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
